@@ -1574,7 +1574,7 @@
     }
 
     // 只在下方填入 Supabase Project URL 和 Publishable key；绝不能填 Secret/service_role key。
-    const SUPABASE_URL = "https://lcumgzlbkbeesavebztd.supabase.co/rest/v1/";
+    const SUPABASE_URL = "https://lcumgzlbkbeesavebztd.supabase.co";
     const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_stKVEGHixCr_Ka9n3MY3jQ_IbvzRE3d";
     const cloudConfigured = SUPABASE_URL.startsWith("https://") && !SUPABASE_PUBLISHABLE_KEY.startsWith("PASTE_");
     const cloud = cloudConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
