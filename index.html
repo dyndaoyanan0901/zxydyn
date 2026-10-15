@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DYN × ZXY | 小马与小猫的恋爱纪念馆 LOVE ATLAS</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+SC:wght@400;500;700;900&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
@@ -196,6 +197,22 @@
     </div>
   </header>
 
+  <div id="cloud-status" class="px-4 py-2 text-center text-sm font-semibold bg-amber-100 border-b-2 border-zinc-900">☁️ 正在检查云端连接…</div>
+  <div class="px-4 py-2 flex flex-wrap gap-2 justify-center items-center bg-white border-b-2 border-zinc-900">
+    <span id="cloud-user" class="text-xs font-semibold">访客浏览模式</span>
+    <button id="cloud-login-open" class="pop-btn rounded-lg bg-yellow-300 px-3 py-1 text-sm">🔐 小马 / 小猫登录</button>
+    <button id="cloud-logout" class="pop-btn rounded-lg bg-white px-3 py-1 text-sm hidden">退出登录</button>
+    <button id="cloud-migrate" class="pop-btn rounded-lg bg-green-200 px-3 py-1 text-sm hidden">⬆️ 上传本机旧记录到云端（仅首次）</button>
+  </div>
+  <div id="cloud-login-modal" class="fixed inset-0 z-[100] bg-black/60 hidden items-center justify-center p-4">
+    <form id="cloud-login-form" class="bg-white border-2 border-zinc-900 rounded-xl p-6 max-w-sm w-full space-y-3">
+      <h2 class="text-xl font-black">🐴🐱 纪念馆管理员登录</h2>
+      <input id="cloud-email" type="email" required autocomplete="username" placeholder="邮箱" class="border-2 border-zinc-900 p-2 rounded-lg w-full" />
+      <input id="cloud-password" type="password" required autocomplete="current-password" placeholder="密码" class="border-2 border-zinc-900 p-2 rounded-lg w-full" />
+      <p id="cloud-login-error" class="text-red-600 text-xs"></p>
+      <div class="flex gap-2"><button type="submit" class="pop-btn bg-yellow-300 rounded-lg px-4 py-2">登录</button><button type="button" id="cloud-login-cancel" class="pop-btn rounded-lg px-4 py-2">取消</button></div>
+    </form>
+  </div>
   <!-- Main Content Container -->
   <main class="max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 space-y-8 flex-1">
 
@@ -1556,16 +1573,164 @@
       }
     }
 
-    function saveState() {
+    // 只在下方填入 Supabase Project URL 和 Publishable key；绝不能填 Secret/service_role key。
+    const SUPABASE_URL = "https://lcumgzlbkbeesavebztd.supabase.co/rest/v1/";
+    const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_stKVEGHixCr_Ka9n3MY3jQ_IbvzRE3d";
+    const cloudConfigured = SUPABASE_URL.startsWith("https://") && !SUPABASE_PUBLISHABLE_KEY.startsWith("PASTE_");
+    const cloud = cloudConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
+    let cloudEditor = false, cloudReady = false, cloudLoading = true, cloudRevision = 0;
+    let cloudSaving = false, cloudSavePending = false;
+    const CLOUD_FIELDS = ["trips", "bucketList", "countdown", "heroPhoto", "loveMessages"];
+    const cloudStatus = msg => { const el = document.getElementById("cloud-status"); if (el) el.textContent = msg; };
+    const snapshot = () => Object.fromEntries(CLOUD_FIELDS.map(k => [k, state[k]]));
+    function saveLocalBackup() {
       try {
         localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(state.trips));
         localStorage.setItem(STORAGE_KEY_BUCKET, JSON.stringify(state.bucketList));
         localStorage.setItem(STORAGE_KEY_COUNTDOWN, JSON.stringify(state.countdown));
         localStorage.setItem(STORAGE_KEY_HERO_PHOTO, state.heroPhoto || "");
         localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(state.loveMessages));
-      } catch (e) {
-        // Ignore storage quota errors inside sandboxed frames
+      } catch (e) { console.warn("本地备份空间不足", e); }
+    }
+    function saveState() {
+      if (!cloudEditor || !cloudReady || cloudLoading) {
+        if (cloudLoading) return;
+        cloudStatus("🔒 访客无编辑权限；内容未写入云端");
+        return;
       }
+      cloudSavePending = true;
+      void flushCloudSave();
+    }
+    function dataUrlToBlob(url) {
+      const [meta, content] = url.split(",");
+      const mime = /data:([^;]+)/.exec(meta)?.[1] || "image/jpeg";
+      const bytes = atob(content);
+      const array = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+      return new Blob([array], {type:mime});
+    }
+    async function uploadInlinePhotos(data) {
+      const urls = new Map();
+      async function convert(url) {
+        if (typeof url !== "string" || !url.startsWith("data:image/")) return url;
+        if (urls.has(url)) return urls.get(url);
+        const path = `photos/${crypto.randomUUID()}.jpg`;
+        const {error} = await cloud.storage.from("travel-photos").upload(path, dataUrlToBlob(url), {contentType:"image/jpeg", upsert:false});
+        if (error) throw error;
+        const publicUrl = cloud.storage.from("travel-photos").getPublicUrl(path).data.publicUrl;
+        urls.set(url, publicUrl);
+        return publicUrl;
+      }
+      data.heroPhoto = await convert(data.heroPhoto);
+      for (const trip of data.trips || []) {
+        trip.customPhoto = await convert(trip.customPhoto);
+        for (const day of trip.dailyLogs || []) {
+          if (Array.isArray(day.photos)) day.photos = await Promise.all(day.photos.map(convert));
+        }
+      }
+      return data;
+    }
+    async function flushCloudSave() {
+      if (cloudSaving || !cloudSavePending || !cloudEditor) return;
+      cloudSaving = true;
+      while (cloudSavePending && cloudEditor) {
+        cloudSavePending = false;
+        const rev = ++cloudRevision;
+        cloudStatus("☁️ 正在同步记录和照片…");
+        try {
+          const data = await uploadInlinePhotos(structuredClone(snapshot()));
+          const {error} = await cloud.from("love_atlas").upsert({id:1,data,updated_at:new Date().toISOString()},{onConflict:"id"});
+          if (error) throw error;
+          if (rev === cloudRevision && !cloudSavePending) {
+            Object.assign(state, data);
+            saveLocalBackup();
+            cloudStatus("✅ 已同步到云端 · 双方设备可见");
+          }
+        } catch (err) {
+          cloudStatus("⚠️ 同步失败：" + (err.message || err));
+          console.error(err);
+          // 失败时不自动无限重试，保留页面状态；用户可再次保存或导出备份。
+          break;
+        }
+      }
+      cloudSaving = false;
+    }
+    async function refreshEditor() {
+      if (!cloud) return;
+      const {data:{user}} = await cloud.auth.getUser();
+      cloudEditor = false;
+      if (user) {
+        const {data,error} = await cloud.from("site_editors").select("user_id").eq("user_id",user.id).maybeSingle();
+        // 需要 site_editors 的仅本人 SELECT 策略，否则无法确认编辑身份。
+        cloudEditor = !error && !!data;
+      }
+      document.getElementById("cloud-user").textContent = cloudEditor ? `✏️ 管理员：${user.email}` : (user ? `🔒 未授权账号：${user.email}` : "👀 访客浏览模式");
+      document.getElementById("cloud-login-open").classList.toggle("hidden",!!user);
+      document.getElementById("cloud-logout").classList.toggle("hidden",!user);
+      document.getElementById("cloud-migrate").classList.toggle("hidden",!cloudEditor);
+    }
+    async function loadCloud() {
+      if (!cloud) {
+        cloudLoading = false;
+        cloudStatus("⚙️ 请先在 HTML 中填写 Project URL 和 Publishable key；目前仅显示原始本地内容");
+        return;
+      }
+      try {
+        await refreshEditor();
+        const {data,error} = await cloud.from("love_atlas").select("data").eq("id",1).maybeSingle();
+        if (error) throw error;
+        if (data?.data) {
+          for (const key of CLOUD_FIELDS) if (data.data[key] !== undefined) state[key] = data.data[key];
+          state.trips.forEach(ensureTripDailyLogs);
+          renderAll();
+          cloudStatus("☁️ 云端记录已加载" + (cloudEditor ? " · 可以编辑" : " · 只读浏览"));
+        } else {
+          cloudStatus(cloudEditor ? "☁️ 云端还没有记录；可点击『上传本机旧记录到云端』初始化" : "☁️ 云端尚未初始化；等待管理员上传记录");
+        }
+        cloudReady = true;
+      } catch (err) { cloudStatus("⚠️ 云端读取失败：" + (err.message || err)); }
+      finally { cloudLoading = false; }
+    }
+    function initCloudControls() {
+      const modal = document.getElementById("cloud-login-modal");
+      document.getElementById("cloud-login-open").onclick = () => { modal.classList.remove("hidden"); modal.classList.add("flex"); };
+      document.getElementById("cloud-login-cancel").onclick = () => { modal.classList.add("hidden"); modal.classList.remove("flex"); };
+      document.getElementById("cloud-login-form").onsubmit = async e => {
+        e.preventDefault();
+        if (!cloud) return;
+        const email = document.getElementById("cloud-email").value.trim();
+        const password = document.getElementById("cloud-password").value;
+        const {error} = await cloud.auth.signInWithPassword({email,password});
+        if (error) { document.getElementById("cloud-login-error").textContent = error.message; return; }
+        document.getElementById("cloud-password").value = "";
+        modal.classList.add("hidden"); modal.classList.remove("flex");
+        await refreshEditor();
+        await loadCloud();
+      };
+      document.getElementById("cloud-logout").onclick = async () => { if (cloud) await cloud.auth.signOut(); await refreshEditor(); await loadCloud(); };
+      document.getElementById("cloud-migrate").onclick = async () => {
+        if (!cloudEditor || !cloudReady) return;
+        if (!confirm("将当前浏览器本地保存的旧记录覆盖云端记录。请先导出 JSON 备份，确定继续吗？")) return;
+        loadState(); renderAll(); saveState();
+      };
+      // 捕获阶段拦截访客编辑入口，服务端 RLS 是最终安全边界。
+      document.addEventListener("click", e => {
+        if (cloudEditor) return;
+        const el = e.target.closest("button, [role=button]");
+        if (!el) return;
+        const id = el.id || "";
+        const edit = /^(btn-add-|btn-delete-|btn-reset-default-data|btn-import|btn-save|btn-edit|btn-remove|btn-export-)/.test(id)
+          || /^(data-(?:quick-photo|day-photo-upload|delete|edit|remove|add|toggle|complete))/.test(Array.from(el.attributes).map(a=>a.name).join(" "));
+        if (edit && id !== "btn-export-json") { e.preventDefault(); e.stopImmediatePropagation(); cloudStatus("🔒 只有小马和小猫登录后才能修改"); }
+      }, true);
+      document.addEventListener("submit", e => {
+        if (cloudEditor || e.target.id === "cloud-login-form") return;
+        e.preventDefault(); e.stopImmediatePropagation(); cloudStatus("🔒 请先登录管理员账号");
+      }, true);
+      document.addEventListener("change", e => {
+        if (cloudEditor) return;
+        if (e.target.matches('input[type="file"]')) { e.preventDefault(); e.stopImmediatePropagation(); e.target.value=""; cloudStatus("🔒 请先登录管理员账号"); }
+      }, true);
     }
 
     function showToast(msg) {
@@ -3415,7 +3580,9 @@
     window.addEventListener("DOMContentLoaded", () => {
       loadState();
       initEvents();
+      initCloudControls();
       renderAll();
+      void loadCloud();
       setInterval(updateLoveTimers, 1000);
     });
   </script>
