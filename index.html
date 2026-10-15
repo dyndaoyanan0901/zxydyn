@@ -633,8 +633,8 @@
           <div class="flex items-center gap-2.5">
             <span class="px-3 py-1 rounded-lg bg-[#10B981] text-white border-2 border-zinc-900 font-black text-xs shadow-[2px_2px_0px_#18181B]">DAILY DIARY</span>
             <div>
-              <h2 class="text-xl sm:text-2xl font-black">每一次见面 · 每一天都干了什么（逐日图文手账）</h2>
-              <p class="text-xs text-zinc-600 font-medium">把每次见面的每一天单列出来，随时为任意一天添加多张照片、写下当天去过的地方与点滴回忆</p>
+              <h2 class="text-xl sm:text-2xl font-black">我们的日常 · 小马说 / 小猫说</h2>
+              <p class="text-xs text-zinc-600 font-medium">见面和不见面的日子，都可以分别写下自己的生活、心情和照片。</p>
             </div>
           </div>
 
@@ -645,6 +645,7 @@
           </div>
         </div>
 
+        <div class="mt-4 flex flex-wrap gap-2 items-center"><button id="btn-new-life-note" type="button" class="pop-btn bg-[#FACC15] px-4 py-2 rounded-xl text-sm">＋ 写一篇日常</button><span class="text-xs text-zinc-500">同一天的小马说、小猫说会排在一起</span></div>
         <!-- Filter by Reunion Pill Bar -->
         <div id="daily-reunion-pills" class="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t-2 border-zinc-100">
         </div>
@@ -654,6 +655,20 @@
       </div>
     </section>
 
+    <!-- 独立日常编辑器，不依赖旅行记录 -->
+    <div id="life-note-modal" class="fixed inset-0 z-[70] bg-black/60 hidden items-center justify-center p-4">
+      <form id="life-note-form" class="pop-card bg-[#FFFDF7] rounded-2xl w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-black">🗓️ 写下我们的日常</h3>
+        <input id="life-note-id" type="hidden" />
+        <div class="grid grid-cols-2 gap-3"><label class="text-sm font-bold">日期<input id="life-note-date" type="date" required class="mt-1 w-full border-2 border-zinc-900 rounded-lg p-2" /></label>
+        <label class="text-sm font-bold">谁在说<select id="life-note-author" class="mt-1 w-full border-2 border-zinc-900 rounded-lg p-2"><option value="dyn">🐴 小马说</option><option value="zxy">🐱 小猫说</option></select></label></div>
+        <label class="block text-sm font-bold">标题<input id="life-note-title" maxlength="100" required placeholder="今天想说什么？" class="mt-1 w-full border-2 border-zinc-900 rounded-lg p-2" /></label>
+        <label class="block text-sm font-bold">正文<textarea id="life-note-text" rows="5" class="mt-1 w-full border-2 border-zinc-900 rounded-lg p-2" placeholder="写下今天的心情、生活和想念……"></textarea></label>
+        <label class="block text-sm font-bold">📷 添加照片（可多选）<input id="life-note-photos" type="file" accept="image/*" multiple class="mt-1 w-full text-xs" /></label>
+        <div id="life-note-photo-preview" class="text-xs text-zinc-500"></div>
+        <div class="flex flex-wrap gap-2 justify-end"><button id="life-note-delete" type="button" class="pop-btn bg-rose-100 px-3 py-2 rounded-lg text-xs hidden mr-auto">删除这篇</button><button id="life-note-cancel" type="button" class="pop-btn bg-white px-3 py-2 rounded-lg">取消</button><button type="submit" class="pop-btn bg-[#10B981] text-white px-4 py-2 rounded-lg">保存日常</button></div>
+      </form>
+    </div>
     <!-- BUCKET LIST SECTION: Future Travel Wish List -->
     <section id="section-bucket-view" class="pop-card rounded-2xl p-5 sm:p-6 bg-[#FFFDF9] space-y-5">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-zinc-900 pb-4">
@@ -1377,6 +1392,7 @@
     const STORAGE_KEY_BUCKET = "xiaoma_xiaomao_bucket_v2";
     const STORAGE_KEY_COUNTDOWN = "xiaoma_xiaomao_countdown_v2";
     const STORAGE_KEY_HERO_PHOTO = "xiaoma_xiaomao_hero_photo_v2";
+    const STORAGE_KEY_LIFE_NOTES = "dyn_zxy_life_notes_v1";
     const STORAGE_KEY_MESSAGES = "dyn_zxy_love_messages_v1";
     let DEFAULT_HERO_SRC = "";
 
@@ -1487,6 +1503,7 @@
       countdown: { ...DEFAULT_COUNTDOWN },
       heroPhoto: "",
       loveMessages: [],
+      lifeNotes: [],
       msgFilter: "ALL",
       quickMsgAuthor: "dyn",
       activeView: "both",
@@ -1562,6 +1579,7 @@
         const savedHero = localStorage.getItem(STORAGE_KEY_HERO_PHOTO);
         state.heroPhoto = savedHero || "";
 
+        state.lifeNotes = JSON.parse(localStorage.getItem(STORAGE_KEY_LIFE_NOTES) || "[]");
         const savedMsgs = localStorage.getItem(STORAGE_KEY_MESSAGES);
         state.loveMessages = savedMsgs ? JSON.parse(savedMsgs) : JSON.parse(JSON.stringify(DEFAULT_LOVE_MESSAGES));
       } catch (e) {
@@ -1570,6 +1588,7 @@
         state.bucketList = JSON.parse(JSON.stringify(DEFAULT_BUCKET_LIST));
         state.countdown = { ...DEFAULT_COUNTDOWN };
         state.loveMessages = JSON.parse(JSON.stringify(DEFAULT_LOVE_MESSAGES));
+        state.lifeNotes = [];
       }
     }
 
@@ -1580,7 +1599,7 @@
     const cloud = cloudConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
     let cloudEditor = false, cloudReady = false, cloudLoading = true, cloudRevision = 0;
     let cloudSaving = false, cloudSavePending = false;
-    const CLOUD_FIELDS = ["trips", "bucketList", "countdown", "heroPhoto", "loveMessages"];
+    const CLOUD_FIELDS = ["trips", "bucketList", "countdown", "heroPhoto", "loveMessages", "lifeNotes"];
     const cloudStatus = msg => { const el = document.getElementById("cloud-status"); if (el) el.textContent = msg; };
     const snapshot = () => Object.fromEntries(CLOUD_FIELDS.map(k => [k, state[k]]));
     function saveLocalBackup() {
@@ -1590,6 +1609,7 @@
         localStorage.setItem(STORAGE_KEY_COUNTDOWN, JSON.stringify(state.countdown));
         localStorage.setItem(STORAGE_KEY_HERO_PHOTO, state.heroPhoto || "");
         localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(state.loveMessages));
+        localStorage.setItem(STORAGE_KEY_LIFE_NOTES, JSON.stringify(state.lifeNotes || []));
       } catch (e) { console.warn("本地备份空间不足", e); }
     }
     function saveState() {
@@ -1627,6 +1647,9 @@
         for (const day of trip.dailyLogs || []) {
           if (Array.isArray(day.photos)) day.photos = await Promise.all(day.photos.map(convert));
         }
+      }
+      for (const note of data.lifeNotes || []) {
+        if (Array.isArray(note.photos)) note.photos = await Promise.all(note.photos.map(convert));
       }
       return data;
     }
@@ -2417,123 +2440,91 @@
       `).join("");
     }
 
+    function escapeLifeText(v) {
+      return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
     function renderDailyJournalSection() {
-      const pillsEl = document.getElementById("daily-reunion-pills");
-      const containerEl = document.getElementById("daily-groups-container");
-      const badgeEl = document.getElementById("daily-total-badge");
-      if (!containerEl) return;
-
-      const chronological = [...state.trips].sort((a, b) => a.startDate.localeCompare(b.startDate));
-      chronological.forEach((t, i) => {
-        t.meetNo = i + 1;
-        ensureTripDailyLogs(t);
-      });
-
-      const totalDaysCount = chronological.reduce((acc, t) => acc + (t.dailyLogs?.length || 0), 0);
-      if (badgeEl) {
-        badgeEl.textContent = `共 ${chronological.length} 次见面 · ${totalDaysCount} 天完整手账`;
+      const pills = document.getElementById("daily-reunion-pills");
+      const container = document.getElementById("daily-groups-container");
+      const badge = document.getElementById("daily-total-badge");
+      if (!container) return;
+      const notes = Array.isArray(state.lifeNotes) ? state.lifeNotes : [];
+      const dates = [...new Set(notes.map(n => n.date).filter(Boolean))].sort().reverse();
+      if (badge) badge.textContent = `共 ${dates.length} 天 · ${notes.length} 篇日常`;
+      if (pills) pills.innerHTML = '<span class="text-xs font-bold text-zinc-500">🐴 小马说 · 🐱 小猫说 · 同一天的故事放在一起</span>';
+      if (!dates.length) {
+        container.innerHTML = '<div class="pop-card rounded-2xl p-8 text-center bg-white text-zinc-500">还没有日常记录。登录后点击「＋ 写一篇日常」，从今天开始吧 💕</div>';
+        return;
       }
-
-      if (pillsEl) {
-        pillsEl.innerHTML = `
-          <span class="text-xs font-black text-zinc-500 mr-1">按见面筛选：</span>
-          <button type="button" data-daily-trip-filter="ALL"
-            class="px-3 py-1 rounded-full border-2 border-zinc-900 text-xs font-black transition ${state.selectedDailyTripFilter === 'ALL' ? 'bg-[#10B981] text-white shadow-[2px_2px_0px_#18181B]' : 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200'}">
-            全部见面 (${totalDaysCount}天)
-          </button>
-        ` + chronological.map(t => {
-          const isSel = state.selectedDailyTripFilter === t.id;
-          return `
-            <button type="button" data-daily-trip-filter="${t.id}"
-              class="px-3 py-1 rounded-full border-2 border-zinc-900 text-xs font-bold transition ${isSel ? 'bg-[#FACC15] text-zinc-900 shadow-[2px_2px_0px_#18181B]' : 'bg-white text-zinc-800 hover:bg-zinc-100'}">
-              #${String(t.meetNo).padStart(2, "0")} ${t.city} (${(t.dailyLogs || []).length}天)
-            </button>
-          `;
-        }).join("");
-      }
-
-      const filteredTrips = state.selectedDailyTripFilter === "ALL"
-        ? chronological
-        : chronological.filter(t => t.id === state.selectedDailyTripFilter);
-
-      const headerColors = ["#FF5470", "#2563EB", "#10B981", "#FACC15", "#A855F7", "#FF7A00"];
-
-      containerEl.innerHTML = filteredTrips.map(trip => {
-        const accentColor = headerColors[(trip.meetNo - 1) % headerColors.length];
-        const isDark = accentColor !== "#FACC15";
-        const daysList = trip.dailyLogs || [];
-
-        return `
-          <div id="daily-group-${trip.id}" class="pop-card rounded-2xl overflow-hidden bg-white">
-            <div style="background-color: ${accentColor};" class="px-4 sm:px-6 py-3 border-b-[2.5px] border-zinc-900 flex flex-wrap items-center justify-between gap-2 ${isDark ? 'text-white' : 'text-zinc-900'}">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="px-2.5 py-0.5 rounded-lg bg-zinc-900 text-[#FACC15] font-display font-black text-xs border border-white">
-                  MEET #${String(trip.meetNo).padStart(2, "0")}
-                </span>
-                <span class="font-black text-sm sm:text-base">📍 ${trip.city} · ${trip.title}</span>
-                <span class="font-mono text-xs bg-white text-zinc-900 px-2.5 py-0.5 rounded-md border border-zinc-900 font-bold">
-                  ${formatDotDateRange(trip.startDate, trip.endDate)} (${daysList.length}天)
-                </span>
+      container.innerHTML = dates.map(date => {
+        const dayNotes = notes.filter(n => n.date === date).sort((a,b) => (a.author === b.author ? (a.createdAt || "").localeCompare(b.createdAt || "") : a.author === "dyn" ? -1 : 1));
+        return `<div class="pop-card rounded-2xl overflow-hidden bg-white">
+          <div class="px-4 sm:px-6 py-3 bg-[#10B981] border-b-[2.5px] border-zinc-900 text-white font-black">📅 ${escapeLifeText(date.replace(/-/g,"."))} · 我们的一天</div>
+          <div class="p-4 sm:p-6 grid grid-cols-1 gap-4 bg-[#FFFDF9]">${dayNotes.map(n => `
+            <div class="pop-card rounded-xl p-4 bg-white space-y-3">
+              <div class="flex items-center justify-between gap-2 border-b border-dashed border-zinc-200 pb-2">
+                <span class="font-black text-base ${n.author === 'zxy' ? 'text-[#2563EB]' : 'text-[#FF5470]'}">${n.author === 'zxy' ? '🐱 小猫说' : '🐴 小马说'}</span>
+                ${cloudEditor ? `<button type="button" data-edit-life-note="${escapeLifeText(n.id)}" class="pop-btn px-3 py-1 rounded-lg bg-[#FACC15] text-xs">✏️ 编辑</button>` : ''}
               </div>
-              <button type="button" data-add-day="${trip.id}" class="pop-btn bg-[#FACC15] hover:bg-amber-300 text-zinc-900 px-3 py-1 rounded-xl text-xs">
-                ＋ 新增一天记录
-              </button>
-            </div>
-
-            <div class="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-[#FFFDF9]">
-              ${daysList.map((dayObj, dIdx) => `
-                <div class="pop-card rounded-xl p-4 bg-white flex flex-col justify-between gap-3">
-                  <div class="space-y-2">
-                    <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-dashed border-zinc-200">
-                      <div class="flex items-center gap-2">
-                        <span class="px-2.5 py-0.5 rounded-md bg-zinc-900 text-[#FACC15] font-mono font-black text-xs">
-                          DAY ${String(dIdx + 1).padStart(2, "0")}
-                        </span>
-                        <span class="font-mono font-black text-xs sm:text-sm text-[#2563EB]">
-                          📅 ${(dayObj.date || "").replace(/-/g, ".")}
-                        </span>
-                      </div>
-                      <div class="flex items-center gap-1.5">
-                        <label class="pop-btn bg-[#FACC15] hover:bg-amber-300 text-zinc-900 px-2.5 py-1 rounded-lg text-xs cursor-pointer flex items-center gap-1">
-                          <span>📷 加照片</span>
-                          <input type="file" accept="image/*" multiple data-day-photo-upload="${trip.id}" data-day-id="${dayObj.id}" class="hidden" />
-                        </label>
-                        <button type="button" data-edit-day-trip="${trip.id}" data-edit-day-id="${dayObj.id}" class="pop-btn bg-white hover:bg-zinc-100 text-zinc-900 px-2.5 py-1 rounded-lg text-xs">
-                          ✏️ 编辑文字/照片
-                        </button>
-                      </div>
-                    </div>
-
-                    <h4 class="font-black text-base text-zinc-900">${dayObj.title || `第 ${dIdx + 1} 天`}</h4>
-                    <p class="text-xs sm:text-sm text-zinc-700 leading-relaxed whitespace-pre-line">${dayObj.content || "点击「编辑文字/照片」写下这一天我们干了什么吧～"}</p>
-                  </div>
-
-                  ${(dayObj.photos && dayObj.photos.length > 0) ? `
-                    <div class="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-100">
-                      ${dayObj.photos.map((pUrl, pIdx) => `
-                        <div class="relative aspect-square rounded-lg border-2 border-zinc-900 shadow-[2px_2px_0px_#18181B] overflow-hidden bg-zinc-100 group">
-                          <img src="${pUrl}" alt="${dayObj.title} 照片 ${pIdx + 1}"
-                            data-lightbox-src="${pUrl}"
-                            data-lightbox-caption="第${trip.meetNo}次见面 · ${trip.city} DAY ${dIdx + 1} (${(dayObj.date || '').replace(/-/g, '.')}) — ${dayObj.title}"
-                            class="w-full h-full object-cover cursor-zoom-in group-hover:scale-105 transition" />
-                          <button type="button" data-remove-day-photo="${trip.id}" data-day-id="${dayObj.id}" data-photo-idx="${pIdx}"
-                            class="absolute top-1 right-1 w-5 h-5 rounded-full bg-zinc-900/85 text-white text-[10px] font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition hover:bg-[#FF5470]" title="删除照片">
-                            ✕
-                          </button>
-                        </div>
-                      `).join("")}
-                    </div>
-                  ` : `
-                    <div class="pt-1 flex items-center justify-between text-[11px] text-zinc-400">
-                      <span>还没有添加这天的照片，点击右上角「📷 加照片」上传吧</span>
-                    </div>
-                  `}
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        `;
-      }).join("");
+              <h4 class="font-black text-base">${escapeLifeText(n.title)}</h4>
+              <p class="text-sm text-zinc-700 whitespace-pre-wrap break-words">${escapeLifeText(n.text)}</p>
+              ${Array.isArray(n.photos) && n.photos.length ? `<div class="grid grid-cols-3 gap-2">${n.photos.map((url,i) => `<img src="${escapeLifeText(url)}" data-lightbox-src="${escapeLifeText(url)}" data-lightbox-caption="${escapeLifeText(n.title)} · 照片 ${i+1}" class="w-full aspect-square object-cover rounded-lg border-2 border-zinc-900 cursor-zoom-in" alt="日常照片 ${i+1}" />`).join('')}</div>` : ''}
+            </div>`).join('')}</div></div>`;
+      }).join('');
+    }
+    function openLifeNote(id = null) {
+      if (!cloudEditor) { cloudStatus("🔒 请先登录管理员账号"); return; }
+      const note = (state.lifeNotes || []).find(n => n.id === id);
+      document.getElementById("life-note-id").value = note?.id || "";
+      document.getElementById("life-note-date").value = note?.date || new Date().toLocaleDateString('en-CA');
+      document.getElementById("life-note-author").value = note?.author || "dyn";
+      document.getElementById("life-note-title").value = note?.title || "";
+      document.getElementById("life-note-text").value = note?.text || "";
+      document.getElementById("life-note-photos").value = "";
+      state.tempLifePhotos = [...(note?.photos || [])];
+      document.getElementById("life-note-photo-preview").textContent = `已保存 ${state.tempLifePhotos.length} 张照片；可继续添加`;
+      document.getElementById("life-note-delete").classList.toggle("hidden", !note);
+      document.getElementById("life-note-modal").classList.remove("hidden");
+      document.getElementById("life-note-modal").classList.add("flex");
+    }
+    function closeLifeNote() {
+      document.getElementById("life-note-modal").classList.add("hidden");
+      document.getElementById("life-note-modal").classList.remove("flex");
+    }
+    function initLifeNotes() {
+      document.getElementById("btn-new-life-note").addEventListener("click", () => openLifeNote());
+      document.getElementById("life-note-cancel").addEventListener("click", closeLifeNote);
+      document.body.addEventListener("click", e => {
+        const btn = e.target.closest("[data-edit-life-note]");
+        if (btn) openLifeNote(btn.dataset.editLifeNote);
+      });
+      document.getElementById("life-note-delete").addEventListener("click", () => {
+        if (!cloudEditor || !confirm("确定删除这篇日常吗？")) return;
+        const id = document.getElementById("life-note-id").value;
+        state.lifeNotes = (state.lifeNotes || []).filter(n => n.id !== id);
+        saveState(); closeLifeNote(); renderDailyJournalSection();
+      });
+      document.getElementById("life-note-form").addEventListener("submit", async e => {
+        e.preventDefault();
+        if (!cloudEditor || !cloudReady) return;
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+          const files = [...document.getElementById("life-note-photos").files];
+          const photos = await Promise.all(files.map(f => new Promise((resolve,reject) => readAndCompressImage(f,resolve))));
+          const id = document.getElementById("life-note-id").value || `life-${crypto.randomUUID()}`;
+          const old = (state.lifeNotes || []).find(n => n.id === id);
+          const note = {id, date:document.getElementById("life-note-date").value,
+            author:document.getElementById("life-note-author").value,
+            title:document.getElementById("life-note-title").value.trim(),
+            text:document.getElementById("life-note-text").value.trim(),
+            photos:[...state.tempLifePhotos,...photos],createdAt:old?.createdAt || new Date().toISOString()};
+          if (!Array.isArray(state.lifeNotes)) state.lifeNotes = [];
+          if (old) Object.assign(old,note); else state.lifeNotes.push(note);
+          saveState(); closeLifeNote(); renderDailyJournalSection(); showToast("💕 日常已提交云端同步");
+        } catch (err) { showToast("照片处理失败，请重试"); console.error(err); }
+        finally {btn.disabled = false;}
+      });
     }
 
     function applyViewVisibility() {
@@ -3581,6 +3572,7 @@
       loadState();
       initEvents();
       initCloudControls();
+      initLifeNotes();
       renderAll();
       void loadCloud();
       setInterval(updateLoveTimers, 1000);
